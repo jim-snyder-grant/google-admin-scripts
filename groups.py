@@ -68,8 +68,6 @@ def create_groups(session):
     direct_members = int(g['directMembersCount'])
     if direct_members > 1:
       group.type = Group.GroupType.Group
-      if 'aliases' in g:
-        group.add_aliases(g['aliases'])
     elif direct_members == 1:
       r = session.get('https://admin.googleapis.com/admin/directory/v1/groups/{group_id}/members'.format(group_id=g['email']))
       json_member = r.json()['members'][0]
@@ -83,20 +81,21 @@ def create_groups(session):
 
 def handle_aliases(groups):
   for g in [g for g in groups.values() if g.type == Group.GroupType.Alias]:
-    for target_email in g.members:
-      if not target_email in groups:
-        # Reference to a user - this is actually a one member group
-        g.type = Group.GroupType.Group
-        continue
+    assert(len(g.members) == 1)
+    target_email = next(iter(g.members))
+    if not target_email in groups:
+      # Reference to a user - this is actually a one member group
+      g.type = Group.GroupType.Group
+      continue
 
-      target = groups[target_email]
-      if target.type == Group.GroupType.Alias:
-        raise Exception('Alias to Alias not supported')
-      elif target.type == Group.GroupType.Group:
-        target.add_aliases(g.emails)
-      else:
-        # Target is a user - this is a one member group
-        g.type = Group.GroupType.Group
+    target = groups[target_email]
+    if target.type == Group.GroupType.Alias:
+      raise Exception('Alias to Alias not supported')
+    elif target.type == Group.GroupType.Group:
+      target.add_aliases(g.emails)
+    else:
+      # Target is a user - this is a one member group
+      g.type = Group.GroupType.Group
 
 def list_group_members(session, groups, group):
   if group.members:
@@ -119,30 +118,14 @@ def list_members(session, groups):
     list_group_members(session, groups, g)
 
 def print_groups(groups):
-  # print('ALIASES')
-  # print()
-  # for g in [g for g in groups.values() if g.type == Group.GroupType.Alias]:
-  #   print(g.name)
-  #   print(g.email)
-  #   print(g.members)
-
-  # print('USERS')
-  # print()
-  # for g in [g for g in groups.values() if g.type == Group.GroupType.User]:
-  #   print(g.name)
-  #   print(g.email)
-
-  # print('GROUPS')
-  # print()
   for g in [g for g in groups.values() if g.type == Group.GroupType.Group]:
     print(g.name)
     if g.description:
       print(g.description)
-    print(g.emails)
+    print(sorted(g.emails))
     for member in sorted(g.members):
       print(member)
     print()
-
 
 def main(argv):
   session = AuthorizedSession(get_creds())
