@@ -1,5 +1,7 @@
 #!/usr/bin/python
 
+# started from code from Ransom, and then changed it to not recursively query groups in groups
+
 import enum
 import json
 import os
@@ -11,11 +13,15 @@ from google.auth.transport.requests import AuthorizedSession, Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from requests_oauthlib import OAuth2Session
 
+#DOMAIN, name of the domain to work with
+DOMAIN = 'greenacton.org'
+
 # CLIENT_SECRETS, name of a file containing the OAuth 2.0 information for this
 # application, including client_id and client_secret, which are found
 # on the API Access tab on the Google APIs
 # Console <http://code.google.com/apis/console>
 CLIENT_SECRETS = 'client_secrets.json'
+
 
 def get_creds():
   scopes = ['https://www.googleapis.com/auth/admin.directory.group.member.readonly',
@@ -42,6 +48,7 @@ class Group:
     Group = 1
     Alias = 2
     User = 3
+    Empty = 4
   def __init__(self, group_json):
     self.name = group_json['name']
     self.email = group_json['email']
@@ -57,7 +64,8 @@ class Group:
 
 def create_groups(session):
   r = session.get('https://admin.googleapis.com/admin/directory/v1/groups', 
-                  params={'domain': 'newview.org', 'maxResults': 5000})
+                  params={'domain': DOMAIN, 'maxResults': 5000})
+     
   json_groups = r.json()['groups']
 
   groups = {}
@@ -65,18 +73,11 @@ def create_groups(session):
     if g['name'] == 'everyone':
       continue
     group = Group(g)
-    direct_members = int(g['directMembersCount'])
-    if direct_members > 1:
-      group.type = Group.GroupType.Group
-    elif direct_members == 1:
-      r = session.get('https://admin.googleapis.com/admin/directory/v1/groups/{group_id}/members'.format(group_id=g['email']))
-      json_member = r.json()['members'][0]
-      if 'newview.org' in json_member['email']:
-        group.type = Group.GroupType.Alias
-        group.members = {json_member['email']}
-      else:
-        group.type = Group.GroupType.User
+    group.type = Group.GroupType.Group
+    if (0 == int(g['directMembersCount'])):
+        group.type = Group.GroupType.Empty
     groups[g['email']] = group
+    
   return groups
 
 def handle_aliases(groups):
@@ -98,27 +99,29 @@ def handle_aliases(groups):
       g.type = Group.GroupType.Group
 
 def list_group_members(session, groups, group):
+
   if group.members:
     # members already listed
     return
   r = session.get('https://admin.googleapis.com/admin/directory/v1/groups/{group_id}/members'.format(group_id=group.email))
-  json_members = r.json()['members']
+  if (group.type == Group.GroupType.Empty):
+      json_members = [{'email' : '(empty group)'}]
+  else:
+      json_members = r.json()['members']
   for member in json_members:
     member_email = member['email']
     if member_email in groups:
       target_group = groups[member_email]
       if target_group.type == Group.GroupType.Group:
-        list_group_members(session, groups, target_group)
-        group.members.update(target_group.members)
-        continue
+            member_email = '~' + member_email  
     group.members.add(member_email.lower())
 
 def list_members(session, groups):
-  for g in [g for g in groups.values() if g.type == Group.GroupType.Group]:
+  for g in [g for g in groups.values() if g.type in {Group.GroupType.Group,Group.GroupType.Empty}] :
     list_group_members(session, groups, g)
 
 def print_groups(groups):
-  for g in [g for g in groups.values() if g.type == Group.GroupType.Group]:
+  for g in [g for g in groups.values() if g.type in {Group.GroupType.Group,Group.GroupType.Empty}] :
     print(g.name)
     if g.description:
       print(g.description)
@@ -130,7 +133,7 @@ def print_groups(groups):
 def main(argv):
   session = AuthorizedSession(get_creds())
   groups = create_groups(session)
-  handle_aliases(groups)
+  handle_aliases(groups)    
   list_members(session, groups)
   print_groups(groups)
 
