@@ -2,6 +2,14 @@
 
 # started from code from Ransom, and then changed it to not recursively query groups in groups
 
+HELP = "Extracts the emails from every group list in a given domain.\n\
+        Usage: python groups.py DOMAIN [CSV] [TEXT]  \n\
+        DOMAIN - the domain to use, e.g mydomain.com\n\
+        optional output format arguments: \n\
+        TEXT (default) output as text\n\
+        CSV output as CSV\n\
+        "
+
 import enum
 import json
 import os
@@ -13,8 +21,8 @@ from google.auth.transport.requests import AuthorizedSession, Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from requests_oauthlib import OAuth2Session
 
-#DOMAIN, name of the domain to work with
-DOMAIN = 'greenacton.org'
+#DOMAIN, name of the domain to work with 
+#DOMAIN = ''  
 
 # CLIENT_SECRETS, name of a file containing the OAuth 2.0 information for this
 # application, including client_id and client_secret, which are found
@@ -62,11 +70,11 @@ class Group:
   def add_aliases(self, aliases: list[str]):
     self.emails.update(aliases)
 
-def create_groups(session):
+def create_groups(session, domain):
   r = session.get('https://admin.googleapis.com/admin/directory/v1/groups', 
-                  params={'domain': DOMAIN, 'maxResults': 5000})
+                  params={'domain': domain, 'maxResults': 5000})
      
-  json_groups = r.json()['groups']
+  json_groups = r.json()['groups'] 
 
   groups = {}
   for g in json_groups:
@@ -77,7 +85,6 @@ def create_groups(session):
     if (0 == int(g['directMembersCount'])):
         group.type = Group.GroupType.Empty
     groups[g['email']] = group
-    
   return groups
 
 def handle_aliases(groups):
@@ -120,22 +127,55 @@ def list_members(session, groups):
   for g in [g for g in groups.values() if g.type in {Group.GroupType.Group,Group.GroupType.Empty}] :
     list_group_members(session, groups, g)
 
-def print_groups(groups):
-  for g in [g for g in groups.values() if g.type in {Group.GroupType.Group,Group.GroupType.Empty}] :
-    print(g.name)
-    if g.description:
-      print(g.description)
-    print(sorted(g.emails))
-    for member in sorted(g.members):
-      print(member)
-    print()
+def print_groups(groups, domain, useCSV, useTEXT):
 
+    if useCSV:
+        with open(domain+'.list.csv', 'w') as fCSV:
+            for g in [g for g in groups.values() if g.type in {Group.GroupType.Group,Group.GroupType.Empty}]:
+                for member in sorted(g.members):
+                    print(member + "," + g.name,file=fCSV)
+            print("created and filled " + fCSV.name)
+    if useTEXT:       
+        with open(domain+'.list.txt', 'w') as fTXT:
+            for g in [g for g in groups.values() if g.type in {Group.GroupType.Group,Group.GroupType.Empty}]:
+                print (g.name, file=fTXT)
+                if g.description:
+                    print(g.description, file=fTXT)
+                print(sorted(g.emails),file=fTXT)
+                for member in sorted(g.members):
+                    print(member,file=fTXT)
+                print("",file=fTXT)
+            print("created and filled " + fTXT.name)
+      
 def main(argv):
-  session = AuthorizedSession(get_creds())
-  groups = create_groups(session)
-  handle_aliases(groups)    
-  list_members(session, groups)
-  print_groups(groups)
+    
+    sample = open('samplefile.txt', 'w')
+    print('GeeksForGeeks', file = sample)
+    sample.close()
+    
+    
+    argc = len(argv)
+    if 1 == argc:
+        print(HELP)
+        exit(0)
+    
+    domain = argv[1]
+    print("Domain: " + domain)
+    hasCSV =  "CSV" in argv
+    hasTEXT = "TEXT" in argv
+#TEXT is the default     
+    if not hasTEXT and not hasCSV:
+        hasTEXT = True
+    if (hasTEXT):
+        print("using text format")
+    if (hasCSV):
+        print("using csv format")
+    
+    session = AuthorizedSession(get_creds())
+    groups = create_groups(session, domain)
+#    handle_aliases(groups)    
+    list_members(session, groups)
+    print_groups(groups, domain, hasCSV, hasTEXT)
 
 if __name__ == '__main__':
   main(sys.argv)
